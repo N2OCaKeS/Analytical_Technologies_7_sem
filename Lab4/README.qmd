@@ -1,0 +1,199 @@
+---
+title: "Анализ логов с помощью языка R"
+author: Филиппенко Максим Дмитриевич БИСО-02-20
+format: 
+    md:
+        output-file: README.md
+engine: knitr
+---
+
+
+## Цель работы
+
+1. Зекрепить практические навыки использования языка программирования R для обработки данных 
+2. Закрепить знания основных функций обработки данных экосистемы tidyverse языка R
+3. Закрепить навыки исследования метаданных DNS трафика
+
+## Ход работы
+
+### 1. Подготовка данных для работы
+
+1. Подключим библиотеку "tidyverse"
+
+```{r}
+library("tidyverse")
+library(dplyr)
+```
+
+2. Считаем данные из файлов в переменные и просмотрим данные
+
+```{r}
+dataLog <- read.csv("/Users/n2o.cake/Projects/Analytical_Technologies_7_sem/Lab4/data/dns.log",sep="\t")
+dataCSV <- read.csv("/Users/n2o.cake/Projects/Analytical_Technologies_7_sem/Lab4/data/header.csv")
+dataCSV
+```
+
+3. Изменим названия заголовков
+
+```{r}
+dataCSV[3,"Field"] <- "id.orig_h"
+dataCSV[3,"Type"] <- "addr"
+dataCSV[4,"Field"] <- "id.resp_h"
+dataCSV[4,"Type"] <- "addr"
+dataCSV[4,"Description"] <- "Response IP"
+dataCSV <- dataCSV %>% add_row(Field = "id.orig_p", Type = "port", Description = "Origin port", .before = 4)
+dataCSV <- dataCSV %>% add_row(Field = 'id.resp_p', Type = "port", Description = "Response port", .before = 6)
+dataCSV
+```
+
+4. Присвоим название заголовков и изменим временной формат
+
+```{r}
+ColName <- dataCSV[,1]
+colnames(dataLog) <- ColName
+dataLog$ts <- as.POSIXct(dataLog$ts,origin = "1970-01-01")
+```
+
+5. С помощью glimpse() просмотрим структуру данных
+
+```{r}
+glimpse(dataCSV)
+```
+
+```{r}
+glimpse(dataLog)
+```
+
+---
+
+### 2. Начало анализа данных и ответ на поставленные вопросы
+
+1. Сколько участников информационного обмена в сети Доброй Организации?
+
+```{r}
+d <- data.frame(a = c(dataLog[,"id.orig_h"], dataLog[,"id.resp_h"]))
+participants <- unique(d$a)
+length(participants)
+```
+
+2. Какое соотношение участников обмена внутри сети и участников обращений к внешним ресурсам?
+
+```{r}
+stip<- c("192.168.", "10.", "100.([6-9]|1[0-1][0-9]|12[0-7]).", "172.((1[6-9])|(2[0-9])|(3[0-1])).")
+stips <- participants[grep(paste(stip, collapse = "|"), participants)]
+internal <- sum(participants %in% stips)
+external <- length(participants) - internal
+ratio <- internal / external
+ratio
+```
+
+3. Найдите топ-10 участников сети, проявляющих наибольшую сетевую активность.
+
+```{r}
+Users <- dataLog %>% 
+  group_by(`id.orig_h`) %>%   
+  summarise(req = n()) %>% 
+  arrange(desc(req)) %>% 
+  top_n(10, req)
+Users <- as_tibble(Users)
+Users
+```
+
+4. Найдите топ-10 доменов, к которым обращаются пользователи сети и соответственное количество обра-
+щений
+
+```{r}
+Domains <- dataLog %>% group_by(domain = tolower(`query `)) %>% summarise(req = n()) %>% arrange(desc(req)) %>% top_n(10,req)
+Domains
+```
+
+5. Опеределите базовые статистические характеристики (функция summary()) интервала времени между
+последовательным обращениями к топ-10 доменам.
+
+```{r}
+DomainsF <- dataLog %>% filter(tolower(`query `) %in% Domains$domain) %>% arrange(ts)
+interval <- diff(DomainsF$ts)
+summary(interval)
+```
+
+6. Часто вредоносное программное обеспечение использует DNS канал в качестве канала управления, пе-
+риодически отправляя запросы на подконтрольный злоумышленникам DNS сервер. По периодическим запросам на один и тот же домен можно выявить скрытый DNS канал. Есть ли такие IP адреса в исследу- емом датасете?
+
+```{r}
+ip <- dataLog %>% group_by(ip = id.orig_h, domain = tolower(`query `)) %>% summarise(req = n(), .groups = "drop") %>% filter(req > 1)
+unqIp <- unique(ip$ip)
+unqIp %>% length()
+```
+
+```{r}
+unqIp
+```
+
+7. Определите местоположение (страну, город) и организацию-провайдера для топ-10 доменов. Для этого можно использовать сторонние сервисы, например https://v4.ifconfig.co/.
+
+*tools.google.com*
+
+ip: 142.250.185.206
+
+Хост: fra16s52-in-f14.1e100.net
+
+Город: Моунтайн-Вью
+
+Страна: США
+
+ip диапазон: 142.250.0.0 - 142.251.255.255
+
+Название провайдера: Google LLC
+
+---
+
+*www.apple.com*
+
+ip: 23.40.25.24
+
+Город: Santa Clara
+
+Страна: США
+
+Название провайдера: Akamai Technologies, Inc.
+
+---
+
+*time.apple.com*
+
+ip: 17.253.52.253
+
+Хост: ntp.euro.apple.com
+
+Город: Нью-Йорк
+
+Страна: США
+
+ip диапазон: 17.0.0.0 - 17.255.255.255
+
+Название провайдера: Apple Inc.
+
+---
+
+*safebrowsing.clients.google.com*
+
+ip: 142.250.185.78
+
+Хост: fra16s48-in-f14.1e100.net
+
+Город: Моунтайн-Вью
+
+Страна: США
+
+ip диапазон: 142.250.0.0 - 142.251.255.255
+
+Название провайдера: Google LLC
+
+
+## Оценка результатов:
+
+В результате выполнения лабораторной работы были полученны практические навыки обработки данных с помощью языка R
+
+## Вывод:
+
+В данной работе получилось исследовать сетевую активность внутренней сети Доброй Организации.
